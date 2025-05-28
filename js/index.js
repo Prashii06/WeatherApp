@@ -5,62 +5,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Load city coordinates from CSV
     fetch('city_coordinates.csv')
-        .then(response => {
-            if (!response.ok) throw new Error('Failed to load city_coordinates.csv!');
-            return response.text();
-        })
+        .then(response => response.ok ? response.text() : Promise.reject('Failed to load city data'))
         .then(data => {
             const cities = parseCSV(data);
-            populateCityDropdown(cities);
+            cities.forEach(city => {
+                const option = document.createElement('option');
+                option.value = `${city.lat},${city.lon}`;
+                option.textContent = `${city.city}, ${city.country}`;
+                citySelect.appendChild(option);
+            });
         })
         .catch(error => {
-            errorMessage.textContent = 'Error loading city data. Please try again.';
-            console.error('Error loading CSV:', error);
+            errorMessage.textContent = 'Error loading city data.';
+            console.error(error);
         });
 
-    // Parse CSV data (latitude,longitude,city,country)
+    // Parse CSV data
     function parseCSV(data) {
-        const lines = data.trim().split('\n');
-        const cities = [];
-        lines.slice(1).forEach(line => {
+        return data.trim().split('\n').slice(1).map(line => {
             const [lat, lon, city, country] = line.split(',');
-            if (lat && lon && city && country) {
-                cities.push({ city, country, lat: parseFloat(lat), lon: parseFloat(lon) });
-            }
-        });
-        return cities;
+            return lat && lon && city && country ? { city, country, lat: parseFloat(lat), lon: parseFloat(lon) } : null;
+        }).filter(Boolean);
     }
 
-    // Populate city dropdown with city and country
-    function populateCityDropdown(cities) {
-        cities.forEach(city => {
-            const option = document.createElement('option');
-            option.value = `${city.lat},${city.lon}`;
-            option.textContent = `${city.city}, ${city.country}`;
-            citySelect.appendChild(option);
-        });
-    }
-
-    // Fetch weather data from 7Timer API (civillight endpoint)
+    // Fetch weather data from 7Timer API (civillight endpoint) with CORS proxy
     async function fetchWeather(lat, lon) {
-        const url = `http://www.7timer.info/bin/civillight.php?lon=${lon}&lat=${lat}&ac=0&unit=metric&output=json&tzshift=0`;
+        const baseUrl = `http://www.7timer.info/bin/civillight.php?lon=${lon}&lat=${lat}&ac=0&unit=metric&output=json&tzshift=0`;
+        const url = `https://cors-anywhere.herokuapp.com/${baseUrl}`;
         try {
             const response = await fetch(url, { mode: 'cors' });
             if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
             const data = await response.json();
-            console.log('API Response:', data); // Debug: Log the full API response
-            if (!data.dataseries || !Array.isArray(data.dataseries)) {
-                throw new Error('Invalid API response: No valid dataseries found');
-            }
-            return data;
+            console.log('API Response:', data); // Debug: Log the API response
+            return data.dataseries && Array.isArray(data.dataseries) ? data : null;
         } catch (error) {
-            errorMessage.textContent = 'Unable to fetch weather data. Please try another city.';
-            console.error('Error fetching weather:', error);
+            errorMessage.textContent = 'Unable to fetch weather data.';
+            console.error('Fetch Error:', error);
             return null;
         }
     }
 
-    // Map 7Timer weather codes to images in the 'images' folder
+    // Map 7Timer weather codes to images
     const weatherIcons = {
         clear: 'images/clear.png',
         pcloudy: 'images/cloudy.png',
@@ -79,35 +64,31 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Display 7-day forecast
-    function displayForecast(data, city) {
+    function displayForecast(data) {
         weatherForecast.innerHTML = '';
-        if (!data || !data.dataseries || data.dataseries.length === 0) {
-            errorMessage.textContent = 'No weather data available for this location.';
+        if (!data) {
+            errorMessage.textContent = 'No weather data available.';
             return;
         }
 
-        const today = new Date(); 
-        data.dataseries.slice(0, 7).forEach((day, index) => {
-            // Calculate the date for each forecast day
+        const today = new Date(); // Current date: May 28, 2025
+        data.slice(0, 7).forEach((day, index) => {
             const forecastDate = new Date(today);
             forecastDate.setDate(today.getDate() + index);
             const dateString = forecastDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
-            // Handle missing or undefined weather field
             const weatherCondition = day.weather && typeof day.weather === 'string' 
                 ? day.weather.charAt(0).toUpperCase() + day.weather.slice(1) 
                 : 'Unknown';
-
-            console.log(`Day ${index + 1}: Weather=${day.weather}, Temp Max=${day.temp2m?.max}, Temp Min=${day.temp2m?.min}`); // Debug: Log each day's data
 
             const card = document.createElement('div');
             card.className = 'forecast-card';
             card.innerHTML = `
                 <h3>${dateString}</h3>
                 <img src="${weatherIcons[day.weather] || 'images/clear.png'}" alt="${weatherCondition}">
-                <p>Max: ${day.temp2m?.max ?? 'N/A'}°C</p>
-                <p>Min: ${day.temp2m?.min ?? 'N/A'}°C</p>
-                <p>${weatherCondition}</p>
+                <p class="temp-max">Max: ${day.temp2m?.max ?? 'N/A'}°C</p>
+                <p class="temp-min">Min: ${day.temp2m?.min ?? 'N/A'}°C</p>
+                <p class="weather">${weatherCondition}</p>
             `;
             weatherForecast.appendChild(card);
         });
@@ -123,6 +104,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         const data = await fetchWeather(lat, lon);
-        displayForecast(data, citySelect.options[citySelect.selectedIndex].text);
+        displayForecast(data);
     });
 });
